@@ -34,6 +34,9 @@ class mBLLL():
         self.n_nodes = network_nx.number_of_nodes() #save node number
         self.random_state = random_state 
         
+        #make list to store timesteps
+        self.timestamp = []
+        
         #make list to store arrays of agent positions
         self.agents_pos = []
         #if provided, store starting positions
@@ -111,7 +114,7 @@ class mBLLL():
             return (coverage_list[agent].size - not_uniquely_covered)
         
         
-    def step(self, agent=None, temperature=1, trick=True, random_state=None):
+    def step(self, agent=None, temperature=1, trick=True, random_state=None, ghosts = True):
         """Method to make one step of the BLLL algo.
         
         Propose a random move for an agent, accept the move with some probability (see ref).
@@ -121,44 +124,52 @@ class mBLLL():
             temperature (float): temperature of the simulation (see ref).
             trick (bool): compare probs in log-space to avoid float64 overflow
             random_state (int): if not None, random seed to be set at the beginning of the step
+            ghosts (bool): if True, multiple agents can occupy the same node. if False, moves are restricted to empty nodes.
         Returns:
             nothing
         """
         #set random seed if specified
         if random_state is not None:
             np.random.seed(random_state)
+        
         #3) pick a random p_i \in P
         if agent is None: 
             #pick a random agent
             agent = np.random.randint(0,self.n_agents)
+
         #4) pick a random a^'_i \in A^c_i(a_i(t))
         agent_neighborood = list(self.network_nx.neighbors(self.agents_pos[-1][agent])) #find neighborhood node indices
-#               network=nx.to_numpy_array(self.network_nx)
-#               agent_neighborood = np.where(network[self.agents_pos[-1][agent],:]==1)[0] #find neighborhood node indices #CHANGE!
-        next_move = np.random.choice(agent_neighborood, 1)[0] #pick one        
-        #5) a_j(t+1)=a_j(t) for all p_j \neq p_i 
+        if ghosts == False:
+            #filter neighborhood to include only empty nodes
+            agent_neighborood = [node for node in agent_neighborood if node not in self.agents_pos[-1]]
+        #if neighborhood is crowded, you dont move by default
         self.agents_pos.append(self.agents_pos[-1].copy()) #to be edited for current agent if the move is accepted
-        if trick==False: #do as in the pseudocode
-            #6) \alpha = \exp(U_i(a(t))/T) 
-            alpha = np.exp(self.utility(agent, self.coverages)/temperature)
-            #7) \beta = \exp(U_i(a^'_i ,a_{−i}(t))/T) 
-            new_coverages = self.coverages
-            new_coverages[agent] = self.get_coverage(next_move, self.network_nx, self.cover_ranges[agent]) #change coverage of agent for the next step  
-            beta = np.exp(self.utility(agent, new_coverages)/temperature)
-            #8) a_i(t+1) = a_i(t) w.p. \alpha/(\alpha+\beta), a^'_i otherwise
-            move_refused = (np.random.random() < (alpha/(alpha+beta)))
-        else: #compare alpha and beta in log-space
-            #do logs alpha and beta
-            log_alpha = self.utility(agent, self.coverages)/temperature
-            new_coverages = [np.copy(cov) for cov in self.coverages]
-            new_coverages[agent] = self.get_coverage(next_move, self.network_nx, self.cover_ranges[agent]) #change coverage of agent for the next step  
-            log_beta = self.utility(agent, new_coverages)/temperature
-            #compare them
-            #max_logs = np.max((log_alpha, log_beta))
-            max_logs = log_alpha
-            alpha_2 = np.exp(log_alpha-max_logs)
-            beta_2 = np.exp(log_beta-max_logs)
-            move_refused = (np.random.random() < (alpha_2/(alpha_2+beta_2)))
+        if len(agent_neighborood) == 0:
+            move_refused = True
+        else:
+            next_move = np.random.choice(agent_neighborood, 1)[0] #pick candidate for next move      
+            #5) a_j(t+1)=a_j(t) for all p_j \neq p_i 
+            if trick==False: #do as in the pseudocode
+                #6) \alpha = \exp(U_i(a(t))/T) 
+                alpha = np.exp(self.utility(agent, self.coverages)/temperature)
+                #7) \beta = \exp(U_i(a^'_i ,a_{−i}(t))/T) 
+                new_coverages = self.coverages
+                new_coverages[agent] = self.get_coverage(next_move, self.network_nx, self.cover_ranges[agent]) #change coverage of agent for the next step  
+                beta = np.exp(self.utility(agent, new_coverages)/temperature)
+                #8) a_i(t+1) = a_i(t) w.p. \alpha/(\alpha+\beta), a^'_i otherwise
+                move_refused = (np.random.random() < (alpha/(alpha+beta)))
+            else: #compare alpha and beta in log-space
+                #do logs alpha and beta
+                log_alpha = self.utility(agent, self.coverages)/temperature
+                new_coverages = [np.copy(cov) for cov in self.coverages]
+                new_coverages[agent] = self.get_coverage(next_move, self.network_nx, self.cover_ranges[agent]) #change coverage of agent for the next step  
+                log_beta = self.utility(agent, new_coverages)/temperature
+                #compare them
+                #max_logs = np.max((log_alpha, log_beta))
+                max_logs = log_alpha
+                alpha_2 = np.exp(log_alpha-max_logs)
+                beta_2 = np.exp(log_beta-max_logs)
+                move_refused = (np.random.random() < (alpha_2/(alpha_2+beta_2)))
                     
         if move_refused:
             #we have already the right positions in step 5)
@@ -169,7 +180,7 @@ class mBLLL():
             self.coverages = [np.copy(cov) for cov in new_coverages]
 #             self.potentials.append(np.unique(np.concatenate(self.coverages)).size) #i want to be able to append potentials after infection
 
-    def infect(self, agent=None, prob=0.5, cover_ranges = 2, cover_ranges_distr="const", random_state=None):
+    def infect(self, agent=None, prob=0.5, cover_ranges = 2, cover_ranges_distr="const", ghosts=True, random_state=None):
         """Method to make the infection step of the mBLLL algo.
         
         Infects each node in coverage with some probability.
@@ -179,6 +190,7 @@ class mBLLL():
             prob (float): probability of a covered node to be infected
             cover_ranges (int): cover range of the new agents. depending on cover_ranges_distr, either will be the cover ranges or the new agents, or a parameter for a distribution from which the new cover ranges will be sampled
             cover_ranges_distr (str): if "const", all new agents have cover range equal to cover_ranges. if "poisson", cover ranges for each new agent are sampled from a poisson distribution with rate=cover_ranges 
+            ghosts (bool): if True, multiple agents can occupy the same node. if False, infections are restricted to empty nodes.
             random_state (int): if not None, random seed to be set at the beginning of the infection step
         Returns:
             nothing
@@ -191,7 +203,10 @@ class mBLLL():
             #pick a random agent
             agent = np.random.randint(0,self.n_agents)
         #nodes covered by agent
-        agent_coverage = self.coverages[agent] 
+        agent_coverage = self.coverages[agent]
+        if ghosts == False:
+            #filter neighborhood to include only empty nodes
+            agent_coverage = [node for node in agent_coverage if node not in self.agents_pos[-1]] 
         for node in agent_coverage:
             #random infection
             if np.random.random() < prob:
@@ -238,7 +253,7 @@ class mBLLL():
             #calculate and add new potential
             self.add_potentials()
             
-    def run_mBLLL(self, t_steps = 100, temperature = 1, prob=0.5, cover_ranges = 2, cover_ranges_distr="const"):
+    def run_mBLLL(self, t_steps = 100, temperature = 1, prob=0.5, cover_ranges = 2, cover_ranges_distr="const", step_size="one", ghosts=True):
         """Method to run t_steps of the mBLLL algo.
         
         Run the mBLLL algo for t_steps.
@@ -249,19 +264,36 @@ class mBLLL():
             prob (float): probability of a covered node to be infected
             cover_ranges (int): cover range of the new agents. depending on cover_ranges_distr, either will be the cover ranges or the new agents, or a parameter for a distribution from which the new cover ranges will be sampled
             cover_ranges_distr (str): if "const", all new agents have cover range equal to cover_ranges. if "poisson", cover ranges for each new agent are sampled from a poisson distribution with rate=cover_ranges 
-            
+            step_size (str): if "one", only one (random) agent is activated in each step, if "all", all agents are activated in random order in each step
+            ghosts (bool): if True, multiple agents can occupy the same node. if False, moves and infections are restricted to empty nodes.
+
         Returns:
             nothing
         """
         for i in range(t_steps):
-            #choose agent:
-            agent = np.random.randint(0,self.n_agents)
-            #attempt move
-            self.step(agent=agent, temperature=temperature)
-            #attempt infections
-            self.infect(agent=agent, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr)
-            #calculate and add new potential
-            self.add_potentials()
+            if step_size == "one":
+                #choose agent:
+                agent = np.random.randint(0,self.n_agents)
+                #attempt move
+                self.step(agent=agent, temperature=temperature, ghosts=ghosts)
+                #attempt infections
+                self.infect(agent=agent, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
+                #calculate and add new potential
+                self.add_potentials()
+
+            elif step_size == "all":
+                #choose order of agents at random:
+                agent_schedule = np.random.permutation(self.n_agents)
+                for agent in agent_schedule:
+                    #attempt move
+                    self.step(agent=agent, temperature=temperature, ghosts=ghosts)
+                    #attempt infections
+                    self.infect(agent=agent, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
+                    #calculate and add new potential
+                    self.add_potentials()
+                    #add timestep
+                    self.timestamp.append(i+1)
+
             
     def run_BLLL_annealing(self, t_steps = 100, temperature_start = 10, temperature_stop = 0.1, rate="geometric"):
         """Method to run t_steps of the BLLL algo in a simulated annealing fashion.
@@ -315,7 +347,7 @@ class mBLLL():
         
         """
         if (overwrite == False) and path.exists(file_path):
-            print("File: {} already exists. Try again with overwrite=True to write over it.".format(file_path))
+            print("File: '{}' already exists. Try again with overwrite=True to write over it.".format(file_path))
         else :
             pickle.dump(self, open(file_path, "wb" ))
                         
