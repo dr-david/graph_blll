@@ -277,7 +277,7 @@ class mBLLL():
                 #attempt move
                 self.step(agent=agent, temperature=temperature, ghosts=ghosts)
                 #attempt infections
-                self.infect(agent=agent, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
+                self.infect(agent=agent, prob=prob, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
                 #calculate and add new potential
                 self.add_potentials()
 
@@ -288,7 +288,7 @@ class mBLLL():
                     #attempt move
                     self.step(agent=agent, temperature=temperature, ghosts=ghosts)
                     #attempt infections
-                    self.infect(agent=agent, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
+                    self.infect(agent=agent, prob=prob, cover_ranges=cover_ranges, cover_ranges_distr=cover_ranges_distr, ghosts=ghosts)
                     #calculate and add new potential
                     self.add_potentials()
                     #add timestep
